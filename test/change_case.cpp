@@ -3,12 +3,11 @@
 
 #include <format>
 #include <iostream>
+#include <string>
 #include <string_view>
-#include <vector>
 
 #include "src/change_case.h"
 #include <random>
-
 
 
 void shuffle(auto& arr) {
@@ -22,7 +21,7 @@ void shuffle(auto& arr) {
 
 
 int main() {
-    std::vector<char> str(1024);
+    std::string str;
     for (int i = 0; i < 128; i++) {
         str.push_back(i);
     }
@@ -35,7 +34,7 @@ int main() {
     }
 
     constexpr std::string_view alphabets = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    std::vector<char> str_all_alpha(1024);
+    std::string str_all_alpha;
     str_all_alpha.assign(alphabets.begin(), alphabets.end());
     shuffle(str_all_alpha);
     str_all_alpha.insert(str_all_alpha.end(), alphabets.begin(), alphabets.end());

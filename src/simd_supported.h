@@ -51,104 +51,128 @@ namespace simd_supported {
 #endif
     };
 
+    // include sse family
     constexpr bool avx{
 #ifdef __AVX__
             true
 #endif
     };
 
+    // include sse family + avx
     constexpr bool avx2{
 #ifdef __AVX2__
             true
 #endif
     };
 
+    // include sse family + avx family
     constexpr bool avx512f{
 #ifdef __AVX512F__
             true
 #endif
     };
 
-    constexpr bool avx512pf{
-#ifdef __AVX512PF__
-            true
-#endif
-    };
-
-    constexpr bool avx512er{
-#ifdef __AVX512ER__
-            true
-#endif
-    };
-
+    // include avx512f + sse family + avx family
     constexpr bool avx512cd{
 #ifdef __AVX512CD__
             true
 #endif
     };
 
+    // include avx512f + sse family + avx family
     constexpr bool avx512vl{
 #ifdef __AVX512VL__
             true
 #endif
     };
 
+    // include avx512f + sse family + avx family
     constexpr bool avx512bw{
 #ifdef __AVX512BW__
             true
 #endif
     };
 
+    // include avx512f + sse family + avx family
     constexpr bool avx512dq{
 #ifdef __AVX512DQ__
             true
 #endif
     };
 
+    // include avx512f + sse family + avx family
     constexpr bool avx512ifma{
 #ifdef __AVX512IFMA__
             true
 #endif
     };
 
+    // include avx512bw + avx512f + sse family + avx family
     constexpr bool avx512vbmi{
 #ifdef __AVX512VBMI__
             true
 #endif
     };
 
+    // include avx512bw + avx512f + sse family + avx family
     constexpr bool avx512vbmi2{
 #ifdef __AVX512VBMI2__
             true
 #endif
     };
 
+    // include avx512bw + avx512f + sse family + avx family
     constexpr bool avx512bf16{
 #ifdef __AVX512BF16__
             true
 #endif
     };
 
+    // include avx512dq + avx512bw + avx512vl + avx512f + sse family + avx family
     constexpr bool avx512fp16{
 #ifdef __AVX512FP16__
             true
 #endif
     };
 
+    // include avx512bw + avx512f + sse family + avx family
     constexpr bool avx512bitalg{
 #ifdef __AVX512BITALG__
             true
 #endif
     };
 
+    // include avx512f + sse family + avx family
     constexpr bool avx512vpopcntdq{
 #ifdef __AVX512VPOPCNTDQ__
             true
 #endif
     };
 
+    // include avx512f + sse family + avx family
     constexpr bool avx512vp2intersect{
 #ifdef __AVX512VP2INTERSECT__
+            true
+#endif
+    };
+
+    // include avx512f + sse family + avx family
+    constexpr bool avx512vnni{
+#ifdef __AVX512VNNI__
+            true
+#endif
+    };
+
+    // include avx512f + sse family + avx family
+    constexpr bool avx512pf{
+#ifdef __AVX512PF__
+            true
+#endif
+    };
+
+    // include avx512f + sse family + avx family
+    constexpr bool avx512er{
+#ifdef __AVX512ER__
             true
 #endif
     };
@@ -159,15 +183,9 @@ namespace simd_supported {
 #endif
     };
 
-    constexpr bool avx512vnni{
-#ifdef __AVX512VNNI__
-            true
-#endif
-    };
-
     constexpr bool avx5124vnniw{
 #ifdef __AVX5124VNNIW__
             true
 #endif
     };
-}// namespace simd_supported
+}  // namespace simd_supported
