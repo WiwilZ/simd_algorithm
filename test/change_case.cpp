@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-#include "src/change_case.h"
+#include "include/change_case.h"
 #include <random>
 
 

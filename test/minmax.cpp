@@ -2,7 +2,7 @@
 #include <iostream>
 #include <vector>
 
-#include "src/minmax.h"
+#include "include/minmax.h"
 
 
 int main() {

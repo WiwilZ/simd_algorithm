@@ -5,7 +5,7 @@
 #include <iostream>
 #include <vector>
 
-#include "src/reverse.h"
+#include "include/reverse.h"
 
 
 int main() {

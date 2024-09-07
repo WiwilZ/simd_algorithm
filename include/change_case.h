@@ -304,14 +304,14 @@ namespace detail {
         }
 #ifdef __AVX512BW__
         if (len > 0) {
-            _mm512_mask_storeu_epi8(dst, static_cast<__mmask64>(-1) >> (64 - len), Traits::Convert(Traits::Load(src));
+            _mm512_mask_storeu_epi8(dst, static_cast<__mmask64>(-1) >> (64 - len), Traits::Convert(Traits::Load(include));
         }
 #else
 #ifdef __AVX512F__
         if (len >= 4) {
             using Traits1 = VecTraits<32, IsAllAlpha, Mode>;
             const auto tmp = Traits1::Load(src_end - 4);
-            _mm512_mask_storeu_epi32(dst, static_cast<__mmask16>(-1) >> (16 - (len >> 2)), Traits::Convert(Traits::Load(src));
+            _mm512_mask_storeu_epi32(dst, static_cast<__mmask16>(-1) >> (16 - (len >> 2)), Traits::Convert(Traits::Load(include));
             Traits1::Store(dst_end - 4, Traits1::Convert(tmp));
             return;
         }

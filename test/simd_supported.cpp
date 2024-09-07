@@ -1,6 +1,6 @@
 #include <iostream>
 
-#include "src/simd_supported.h"
+#include "include/simd_supported.h"
 
 
 #define PRINT_SIMD_SUPPORTED(x) std::cout << #x << ": " << x << std::endl
