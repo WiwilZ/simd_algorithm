@@ -377,6 +377,22 @@ namespace detail {
     struct Vec256iTraitsBase {
         using Type = __m256i;
 
+        static __m128i ExtractHigh(__m256i a) noexcept {
+#ifdef __AVX2__
+            return _mm256_extracti128_si256(a, 1);
+#else
+            return _mm256_extractf128_si256(a, 1);
+#endif
+        }
+
+        static __m256i InsertHigh(__m256i a, __m128i b) noexcept {
+#ifdef __AVX2__
+            return _mm256_inserti128_si256(a, b, 1);
+#else
+            return _mm256_insertf128_si256(a, b, 1);
+#endif
+        }
+
         static Type Load(const void* data) noexcept {
             return _mm256_loadu_si256(static_cast<const Type*>(data));
         }
@@ -385,17 +401,17 @@ namespace detail {
         static Type MinMax(Type a, Type b) noexcept {
             const auto a_low = _mm256_castsi256_si128(a);
             const auto b_low = _mm256_castsi256_si128(b);
-            const auto a_high = _mm256_extractf128_si256(a, 1);
-            const auto b_high = _mm256_extractf128_si256(b, 1);
+            const auto a_high = ExtractHigh(a);
+            const auto b_high = ExtractHigh(b);
             const auto low = VecTraits<128, T>::template MinMax<IsMin>(a_low, b_low);
             const auto high = VecTraits<128, T>::template MinMax<IsMin>(a_high, b_high);
-            return _mm256_insertf128_si256(_mm256_castsi128_si256(low), high, 1);
+            return InsertHigh(_mm256_castsi128_si256(low), high);
         }
 
         template <bool IsMin>
         static T ReduceMinMax(Type a) noexcept {
             const auto low = _mm256_castsi256_si128(a);
-            const auto high = _mm256_extractf128_si256(a, 1);
+            const auto high = ExtractHigh(a);
             return VecTraits<128, T>::template ReduceMinMax<IsMin>(VecTraits<128, T>::template MinMax<IsMin>(low, high));
         }
     };
@@ -704,69 +720,33 @@ namespace detail {
 #endif
 
     template <MinMaxMode Mode, class Traits, typename T>
-    auto GetResult(auto v_min, auto v_max) noexcept {
-        T min_val;
-        if constexpr (Mode & ModeMin) {
-            min_val = std::bit_cast<T>(Traits::template ReduceMinMax<true>(v_min));
-        }
-        if constexpr (Mode == ModeMin) {
-            return min_val;
-        } else {
-            T max_val;
-            max_val = std::bit_cast<T>(Traits::template ReduceMinMax<false>(v_max));
-            if constexpr (Mode == ModeMax) {
-                return max_val;
+    struct ModeTraits {
+        static auto Init(auto v) noexcept {
+            if constexpr (Mode != ModeMinMax) {
+                return v;
             } else {
-                return std::pair{min_val, max_val};
-            }
-        }
-    }
-
-    template <MinMaxMode Mode, class Traits, typename T>
-    auto Impl1xVec(const T* data) noexcept {
-        const auto v = Traits::Load(data);
-        return GetResult<Mode, Traits, T>(v, v);
-    }
-
-    template <MinMaxMode Mode, class Traits, typename T>
-    auto ImplGt1Lt2xVec(const T* begin, const T* end) noexcept {
-        using VecType = typename Traits::Type;
-        const auto v1 = Traits::Load(begin);
-        const auto v2 = Traits::Load(reinterpret_cast<const VecType*>(end) - 1);
-        return GetResult<Mode, Traits, T>(Traits::template MinMax<true>(v1, v2), Traits::template MinMax<false>(v1, v2));
-    }
-
-    template <MinMaxMode Mode, class Traits, typename T>
-    auto ImplGt1xVec(const T* begin, const T* end) noexcept {
-        using VecType = typename Traits::Type;
-
-        const auto* first = reinterpret_cast<const VecType*>(begin);
-        const auto* last = reinterpret_cast<const VecType*>(end) - 1;
-
-        const auto v1 = Traits::Load(first);
-        const auto v2 = Traits::Load(last);
-        ++first;
-
-        VecType v_min, v_max;
-        if constexpr (Mode & ModeMin) {
-            v_min = Traits::template MinMax<true>(v1, v2);
-        }
-        if constexpr (Mode & ModeMax) {
-            v_max = Traits::template MinMax<false>(v1, v2);
-        }
-
-        for (; first < last; ++first) {
-            const auto v = Traits::Load(first);
-            if constexpr (Mode & ModeMin) {
-                v_min = Traits::template MinMax<true>(v_min, v);
-            }
-            if constexpr (Mode & ModeMax) {
-                v_max = Traits::template MinMax<false>(v_max, v);
+                return std::pair{v, v};
             }
         }
 
-        return GetResult<Mode, Traits, T>(v_min, v_max);
-    }
+        static auto MinMax(auto v1, auto v2) noexcept {
+            if constexpr (Mode != ModeMinMax) {
+                return Traits::template MinMax<Mode == ModeMin>(v1, v2);
+            } else {
+                const auto [v_min, v_max] = v1;
+                return std::pair{Traits::template MinMax<true>(v_min, v2), Traits::template MinMax<false>(v_max, v2)};
+            }
+        }
+
+        static auto ReduceMinMax(auto v) noexcept {
+            if constexpr (Mode != ModeMinMax) {
+                return std::bit_cast<T>(Traits::template ReduceMinMax<Mode == ModeMin>(v));
+            } else {
+                const auto [v_min, v_max] = v;
+                return std::pair{std::bit_cast<T>(Traits::template ReduceMinMax<true>(v_min)), std::bit_cast<T>(Traits::template ReduceMinMax<false>(v_max))};
+            }
+        }
+    };
 
     template <MinMaxMode Mode, typename T>
     auto ScalarImpl(const T* begin, const T* end) noexcept {
@@ -836,12 +816,12 @@ namespace detail {
     auto Impl(const T* data, size_t len) noexcept {
         const T* end = data + len;
         using ElemType = decltype(ToArithmeticType<T>());
-
+        constexpr size_t ElemBytes = sizeof(T);
         constexpr int VecBits{
 #if defined(__AVX512BW__)
                 512
 #elif defined(__AVX512F__)
-                std::integral<ElemType> && sizeof(ElemType) <= 2 ? 256 : 512
+                std::integral<ElemType> && ElemBytes <= 2 ? 256 : 512
 #elif defined(__AVX2__)
                 256
 #elif defined(__AVX__)
@@ -850,34 +830,44 @@ namespace detail {
                 128
 #endif
         };
-
-        constexpr size_t VecElems = VecBits / 8 / sizeof(ElemType);
+        constexpr size_t VecElems = VecBits / 8 / ElemBytes;
 
         if constexpr (VecBits >= 128) {
             if (len >= VecElems) {
                 using Traits = VecTraits<VecBits, ElemType>;
-                if (len == VecElems) {
-                    return Impl1xVec<Mode, Traits>(data);
+                using VecType = typename Traits::Type;
+                using MT = ModeTraits<Mode, Traits, ElemType>;
+
+                auto v = MT::Init(Traits::Load(data));
+                const size_t offset = (len + VecElems - 1) % VecElems + 1;
+                const auto* first = reinterpret_cast<const VecType*>(data + offset);
+                const auto* last = reinterpret_cast<const VecType*>(end);
+                for (; first != last; ++first) {
+                    v = MT::MinMax(v, Traits::Load(first));
                 }
-                return ImplGt1xVec<Mode, Traits>(data, end);
+                return MT::ReduceMinMax(v);
             }
         }
         if constexpr (VecBits >= 256) {
             if (len >= VecElems / 2) {
                 using Traits = VecTraits<VecBits / 2, ElemType>;
-                if (len == VecElems / 2) {
-                    return Impl1xVec<Mode, Traits>(data);
+                using MT = ModeTraits<Mode, Traits, ElemType>;
+                auto v = MT::Init(Traits::Load(data));
+                if (len != VecElems / 2) {
+                    v = MT::MinMax(v, Traits::Load(end - VecElems / 2));
                 }
-                return ImplGt1Lt2xVec<Mode, Traits>(data, end);
+                return MT::ReduceMinMax(v);
             }
         }
         if constexpr (VecBits == 512) {
             if (len >= VecElems / 4) {
                 using Traits = VecTraits<VecBits / 4, ElemType>;
-                if (len == VecElems / 4) {
-                    return Impl1xVec<Mode, Traits>(data);
+                using MT = ModeTraits<Mode, Traits, ElemType>;
+                auto v = MT::Init(Traits::Load(data));
+                if (len != VecElems / 4) {
+                    v = MT::MinMax(v, Traits::Load(end - VecElems / 4));
                 }
-                return ImplGt1Lt2xVec<Mode, Traits>(data, end);
+                return MT::ReduceMinMax(v);
             }
         }
         return ScalarImpl<Mode>(data, end);

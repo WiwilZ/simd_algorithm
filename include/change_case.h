@@ -154,6 +154,22 @@ namespace detail {
 #endif
         }
 
+        static __m128i ExtractHigh(__m256i a) noexcept {
+#ifdef __AVX2__
+            return _mm256_extracti128_si256(a, 1);
+#else
+            return _mm256_extractf128_si256(a, 1);
+#endif
+        }
+
+        static __m256i InsertHigh(__m256i a, __m128i b) noexcept {
+#ifdef __AVX2__
+            return _mm256_inserti128_si256(a, b, 1);
+#else
+            return _mm256_insertf128_si256(a, b, 1);
+#endif
+        }
+
         static Type Load(const void* data) noexcept {
             return _mm256_loadu_si256(static_cast<const Type*>(data));
         }
@@ -178,10 +194,10 @@ namespace detail {
                 const auto alpha_mask = _mm256_cmpgt_epi8(limit, dist);
 #else
                 const auto dist_low = _mm_sub_epi8(_mm256_castsi256_si128(t), VecTraits<128, IsAllAlpha, Mode>::offset);
-                const auto dist_high = _mm_sub_epi8(_mm256_extractf128_si256(t, 1), VecTraits<128, IsAllAlpha, Mode>::offset);
+                const auto dist_high = _mm_sub_epi8(ExtractHigh(t), VecTraits<128, IsAllAlpha, Mode>::offset);
                 const auto alpha_mask_low = _mm_cmpgt_epi8(VecTraits<128, IsAllAlpha, Mode>::limit, dist_low);
                 const auto alpha_mask_high = _mm_cmpgt_epi8(VecTraits<128, IsAllAlpha, Mode>::limit, dist_high);
-                const auto alpha_mask = _mm256_insertf128_si256(_mm256_castsi128_si256(alpha_mask_low), alpha_mask_high, 1);
+                const auto alpha_mask = InsertHigh(_mm256_castsi128_si256(alpha_mask_low), alpha_mask_high);
 #endif
                 return Xor(v, And(alpha_mask, mask));
             }
@@ -258,46 +274,42 @@ namespace detail {
     }
 
     template <class Traits>
-    void ImplGt1Lt2xVec(void* dst, void* dst_end, const void* src, const void* src_end) noexcept {
-        using VecType = typename Traits::Type;
-        const auto v = Traits::Convert(Traits::Load(static_cast<const VecType*>(src_end) - 1));
+    void ImplGe1Le2xVec(void* dst, void* dst_end, const void* src, const void* src_end) noexcept {
         Impl1xVec<Traits>(dst, src);
-        Traits::Store(static_cast<VecType*>(dst_end) - 1, v);
+        using VecType = typename Traits::Type;
+        const auto* first = static_cast<const VecType*>(src);
+        const auto* last = static_cast<const VecType*>(src_end) - 1;
+        if (first != last) {
+            Impl1xVec<Traits>(static_cast<VecType*>(dst_end) - 1, last);
+        }
     }
-
 
     template <bool IsAllAlpha, CaseMode Mode>
     void Impl(char* dst, const char* src, size_t len) noexcept {
         char* dst_end = dst + len;
         const char* src_end = src + len;
-
         constexpr int VecBits{
-#if defined(__AVX512BW__)
+#if defined(__AVX512F__)
                 512
-#elif defined(__AVX512F__)
-                IsAllAlpha ? 512 : 256
-#elif defined(__AVX2__)
-                256
 #elif defined(__AVX__)
-                IsAllAlpha ? 256 : 128
+                256
 #elif defined(__SSE2__) || defined(_MSC_VER) && !defined(__clang__) && ((defined(_M_AMD64) || defined(_M_X64)) && !defined(_M_ARM64EC) || defined(_M_IX86_FP) && _M_IX86_FP == 2)
                 128
 #else
                 64
 #endif
         };
-
         using Traits = VecTraits<VecBits, IsAllAlpha, Mode>;
         constexpr size_t VecElems = VecBits / 8;
 
         if (len >= VecElems) {
             using VecType = typename Traits::Type;
-            auto* dst_first = reinterpret_cast<VecType*>(dst);
-            auto* dst_last = reinterpret_cast<VecType*>(dst_end) - 1;
-            const auto* src_first = reinterpret_cast<const VecType*>(src);
-            const auto* src_last = reinterpret_cast<const VecType*>(src_end) - 1;
-            Impl1xVec<Traits>(dst_last, src_last);
-            for (; src_first < src_last; ++src_first, ++dst_first) {
+            Impl1xVec<Traits>(dst, src);
+            const size_t offset = (len + VecElems - 1) % VecElems + 1;
+            const auto* src_first = reinterpret_cast<const VecType*>(src + offset);
+            auto* dst_first = reinterpret_cast<VecType*>(dst + offset);
+            const auto* src_last = reinterpret_cast<const VecType*>(src_end);
+            for (; src_first != src_last; ++src_first, ++dst_first) {
                 Impl1xVec<Traits>(dst_first, src_first);
             }
             return;
@@ -310,9 +322,9 @@ namespace detail {
 #ifdef __AVX512F__
         if (len >= 4) {
             using Traits1 = VecTraits<32, IsAllAlpha, Mode>;
-            const auto tmp = Traits1::Load(src_end - 4);
+            const auto tmp = Traits1::Convert(Traits1::Load(src_end - 4));
             _mm512_mask_storeu_epi32(dst, static_cast<__mmask16>(-1) >> (16 - (len >> 2)), Traits::Convert(Traits::Load(include));
-            Traits1::Store(dst_end - 4, Traits1::Convert(tmp));
+            Traits1::Store(dst_end - 4, tmp);
             return;
         }
 #else
@@ -320,43 +332,23 @@ namespace detail {
 
         if constexpr (VecElems == 32) {
             if (len >= 16) {
-                using Traits1 = VecTraits<128, IsAllAlpha, Mode>;
-                if (len == 16) {
-                    Impl1xVec<Traits1>(dst, src);
-                } else {
-                    ImplGt1Lt2xVec<Traits1>(dst, dst_end, src, src_end);
-                }
+                ImplGe1Le2xVec<VecTraits<128, IsAllAlpha, Mode>>(dst, dst_end, src, src_end);
                 return;
             }
         }
         if constexpr (VecElems >= 16) {
             if (len >= 8) {
-                using Traits1 = VecTraits<64, IsAllAlpha, Mode>;
-                if (len == 8) {
-                    Impl1xVec<Traits1>(dst, src);
-                } else {
-                    ImplGt1Lt2xVec<Traits1>(dst, dst_end, src, src_end);
-                }
+                ImplGe1Le2xVec<VecTraits<64, IsAllAlpha, Mode>>(dst, dst_end, src, src_end);
                 return;
             }
         }
         if (len >= 4) {
-            using Traits1 = VecTraits<32, IsAllAlpha, Mode>;
-            if (len == 4) {
-                Impl1xVec<Traits1>(dst, src);
-            } else {
-                ImplGt1Lt2xVec<Traits1>(dst, dst_end, src, src_end);
-            }
+            ImplGe1Le2xVec<VecTraits<32, IsAllAlpha, Mode>>(dst, dst_end, src, src_end);
             return;
         }
 #endif
         if (len >= 2) {
-            using Traits1 = VecTraits<16, IsAllAlpha, Mode>;
-            if (len == 2) {
-                Impl1xVec<Traits1>(dst, src);
-            } else {
-                ImplGt1Lt2xVec<Traits1>(dst, dst_end, src, src_end);
-            }
+            ImplGe1Le2xVec<VecTraits<16, IsAllAlpha, Mode>>(dst, dst_end, src, src_end);
             return;
         }
         if (len > 0) {
@@ -377,10 +369,11 @@ namespace detail {
         using Traits = VecTraits<512, false, Mode>;
         using VecType = typename Traits::Type;
         if (len >= 64) {
-            auto* first = reinterpret_cast<VecType*>(data);
-            auto* last = reinterpret_cast<VecType*>(data + len) - 1;
-            Traits::ImplNotAllAlpha(last);
-            for (; first < last; ++first) {
+            Traits::ImplNotAllAlpha(data);
+            const size_t offset = (len + 63) % 64 + 1;
+            auto* first = reinterpret_cast<VecType*>(data + offset);
+            auto* last = reinterpret_cast<VecType*>(data + len);
+            for (; first != last; ++first) {
                 Traits::ImplNotAllAlpha(first);
             }
             return;

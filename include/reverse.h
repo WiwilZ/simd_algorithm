@@ -328,22 +328,24 @@ namespace detail {
 
 
     template <class Traits>
-    void Impl1xVec(void* data) noexcept {
-        Traits::Store(data, Traits::Reverse(Traits::Load(data)));
-    }
-
-    template <class Traits>
-    void Impl1xVec(void* dst, const void* src) noexcept {
-        Traits::Store(dst, Traits::Reverse(Traits::Load(src)));
-    }
-
-    template <class Traits>
     void ImplGt1Le2xVec(void* begin, void* end) noexcept {
         using VecType = typename Traits::Type;
         auto* last = static_cast<VecType*>(end) - 1;
-        const auto v = Traits::Reverse(Traits::Load(begin));
-        Impl1xVec<Traits>(begin, last);
-        Traits::Store(last, v);
+        const auto left = Traits::Load(begin);
+        Traits::Store(begin, Traits::Reverse(Traits::Load(last)));
+        Traits::Store(last, Traits::Reverse(left));
+    }
+
+    template <class Traits>
+    void ImplGe1Le2xVec(void* begin, void* end) noexcept {
+        using VecType = typename Traits::Type;
+        auto* first = static_cast<VecType*>(begin);
+        auto* last = static_cast<VecType*>(end) - 1;
+        const auto left = Traits::Load(first);
+        if (first != last) {
+            Traits::Store(first, Traits::Reverse(Traits::Load(last)));
+        }
+        Traits::Store(last, Traits::Reverse(left));
     }
 
     template <typename T>
@@ -354,58 +356,35 @@ namespace detail {
 
         using Traits = VecTraits<VecBits, ElemBytes>;
         using VecType = typename Traits::Type;
-        auto* first = reinterpret_cast<VecType*>(data);
-        auto* last = reinterpret_cast<VecType*>(end);
 
-        if constexpr (VecElems == 2) {
-            while (len >= 2 * VecElems) {
-                ImplGt1Le2xVec<Traits>(first, last);
-                ++first;
-                --last;
-                len -= 2 * VecElems;
-            }
-            // len < 2 * VecElems = 4
-            if (len >= 2) {
-                std::swap(*reinterpret_cast<T*>(first), *(reinterpret_cast<T*>(last) - 1));
-            }
-        } else if constexpr (VecElems == 4) {
+        if constexpr (VecElems <= 4) {
+            auto* first = reinterpret_cast<VecType*>(data);
+            auto* last = reinterpret_cast<VecType*>(end);
             auto size = static_cast<intptr_t>(len);
-            while (size > VecElems) {
+            while (size >= 4) {
                 ImplGt1Le2xVec<Traits>(first, last);
                 ++first;
                 --last;
                 size -= 2 * VecElems;
             }
-            // size <= VecElems = 4
-            if (size == 4) {
-                Impl1xVec<Traits>(first);
-                return;
-            }
             if (size >= 2) {
                 std::swap(*reinterpret_cast<T*>(first), *(reinterpret_cast<T*>(last) - 1));
             }
         } else {
-            static_assert(VecElems >= 8);
-
             if (len >= VecElems) {
-                if (len == VecElems) {
-                    Impl1xVec<Traits>(first);
-                    return;
+                const auto left = Traits::Load(data);
+                if (len != VecElems) {
+                    const auto right = Traits::Load(end - VecElems);
+                    const size_t offset = (len / 2 + VecElems - 1) % VecElems + 1;
+                    auto* first = reinterpret_cast<VecType*>(data + offset);
+                    auto* last = reinterpret_cast<VecType*>(end - offset);
+                    auto* sentinel = reinterpret_cast<VecType*>(data + len / 2);
+                    for (; first != sentinel; ++first, --last) {
+                        ImplGt1Le2xVec<Traits>(first, last);
+                    }
+                    Traits::Store(data, Traits::Reverse(right));
                 }
-                while (len > 3 * VecElems) {
-                    ImplGt1Le2xVec<Traits>(first, last);
-                    ++first;
-                    --last;
-                    len -= 2 * VecElems;
-                }
-                // VecElems < len <= 3 * VecElems
-                const auto left = Traits::Reverse(Traits::Load(first));
-                const auto right = Traits::Reverse(Traits::Load(last - 1));
-                if (len > 2 * VecElems) {
-                    Impl1xVec<Traits>(first + 1, last - 2);
-                }
-                Traits::Store(first, right);
-                Traits::Store(last - 1, left);
+                Traits::Store(end - VecElems, Traits::Reverse(left));
                 return;
             }
 #ifdef __AVX512F__
@@ -442,37 +421,22 @@ namespace detail {
                 return;
             }
 #else
-            static_assert(VecElems <= 32);
+            static_assert(8 <= VecElems && VecElems <= 32);
 
             if constexpr (VecElems == 32) {
                 if (len >= 16) {
-                    using Traits1 = VecTraits<128 * ElemBytes, ElemBytes>;
-                    if (len == 16) {
-                        Impl1xVec<Traits1>(data);
-                    } else {
-                        ImplGt1Le2xVec<Traits1>(data, end);
-                    }
+                    ImplGe1Le2xVec<VecTraits<128 * ElemBytes, ElemBytes>>(data, end);
                     return;
                 }
             }
             if constexpr (VecElems >= 16) {
                 if (len >= 8) {
-                    using Traits1 = VecTraits<64 * ElemBytes, ElemBytes>;
-                    if (len == 8) {
-                        Impl1xVec<Traits1>(data);
-                    } else {
-                        ImplGt1Le2xVec<Traits1>(data, end);
-                    }
+                    ImplGe1Le2xVec<VecTraits<64 * ElemBytes, ElemBytes>>(data, end);
                     return;
                 }
             }
             if (len >= 4) {
-                using Traits1 = VecTraits<32 * ElemBytes, ElemBytes>;
-                if (len == 4) {
-                    Impl1xVec<Traits1>(data);
-                } else {
-                    ImplGt1Le2xVec<Traits1>(data, end);
-                }
+                ImplGe1Le2xVec<VecTraits<32 * ElemBytes, ElemBytes>>(data, end);
                 return;
             }
 #endif
