@@ -19,7 +19,9 @@ include_directories(${PROJECT_SOURCE_DIR})
 
 add_executable(simd_algorithm
         #        test/simd_supported.cpp
-#                test/change_case.cpp
-                test/minmax.cpp
-#        test/reverse.cpp
+        #        test/change_case.cpp
+        #        test/minmax.cpp
+        #        test/reverse.cpp
+        #        test/is_sorted.cpp
+        #        main.cpp
 )

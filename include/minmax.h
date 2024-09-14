@@ -25,7 +25,7 @@ namespace detail {
     template <size_t VecBits, typename ElemType>
     struct VecTraits;
 
-    // _mm128/256/512_min/max_ps/d(a, b) returns either a or b is NaN ? b : min/max(a, b)
+    // _mm128/256/512_min/max_ps/d(a, b) returns b if either a or b is NaN otherwise min/max(a, b)
     // _mm128/256/512_cmpunord_ps/d(a, a) returns true if a is NaN otherwise false
 
 #if defined(__SSE2__) || defined(_MSC_VER) && !defined(__clang__) && ((defined(_M_AMD64) || defined(_M_X64)) && !defined(_M_ARM64EC) || defined(_M_IX86_FP) && _M_IX86_FP == 2)
@@ -159,7 +159,7 @@ namespace detail {
             return IsMin ? _mm_reduce_min_epu8(a) : _mm_reduce_max_epu8(a);
 #else
             if constexpr (!IsMin) {
-                static const auto mask = _mm_set1_epi32(-1);
+                const auto mask = _mm_cmpeq_epi32(_mm_undefined_si128(), _mm_undefined_si128());  //all ones, same as _mm_set1_epi32(-1)
                 a = _mm_xor_si128(a, mask);
             }
             a = _mm_min_epu8(a, _mm_srli_epi16(a, 8));
@@ -210,7 +210,7 @@ namespace detail {
             return IsMin ? _mm_reduce_min_epu16(a) : _mm_reduce_max_epu16(a);
 #else
             if constexpr (!IsMin) {
-                static const auto mask = _mm_set1_epi32(-1);
+                const auto mask = _mm_cmpeq_epi32(_mm_undefined_si128(), _mm_undefined_si128());  //all ones, same as _mm_set1_epi32(-1)
                 a = _mm_xor_si128(a, mask);
             }
             const uint16_t res = _mm_cvtsi128_si32(_mm_minpos_epu16(a));
@@ -305,12 +305,15 @@ namespace detail {
             const auto y = _mm512_castsi128_si512(b);
             return _mm512_castsi512_si128(IsMin ? _mm512_min_epu64(x, y) : _mm512_min_epu64(x, y));
 #else
+#if defined(__SSE4_2__) || defined(__AVX__)
             static const auto offset = _mm_set1_epi64x(0x8000'0000'0000'0000);
             const auto x = _mm_xor_si128(a, offset);
             const auto y = _mm_xor_si128(b, offset);
-#if defined(__SSE4_2__) || defined(__AVX__)
             const auto mask = _mm_cmpgt_epi64(x, y);
 #else
+            static const auto offset = _mm_set1_epi64x(0x8000'0000'8000'0000);
+            const auto x = _mm_xor_si128(a, offset);
+            const auto y = _mm_xor_si128(b, offset);
             // a[0] > b[0] => gt[1] | eq[1] & gt[0]
             // a[1] > b[1] => gt[3] | eq[3] & gt[2]
             auto gt = _mm_cmpgt_epi32(x, y);
@@ -774,7 +777,6 @@ namespace detail {
             return std::pair{min_val, max_val};
         }
     }
-
 
     template <typename T, typename Elem = std::remove_cvref_t<T>>
     concept CanVectorize = !std::is_volatile_v<std::remove_reference_t<T>> && (std::floating_point<Elem> && sizeof(Elem) <= sizeof(double) || std::integral<Elem> || std::is_pointer_v<Elem>);
